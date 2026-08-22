@@ -1,6 +1,6 @@
-# FraudGuard.AI
+# ElderShield.AI
 
-FraudGuard.AI is a scam-call simulation and debrief app. This repo contains the monorepo (frontend + backend).
+ElderShield.AI is a scam-call simulation and debrief app. This repo contains the monorepo (frontend + backend).
 
 ## Tech Stack
 

@@ -69,60 +69,53 @@ export default function Live() {
 
   return (
     <PageContainer>
-      <h1>Live call</h1>
+      <h1>Your call is happening now</h1>
+      <p className="muted" style={{ marginBottom: 'var(--space-6)' }}>
+        Answer your phone and talk as you normally would. Hang up whenever you want to.
+      </p>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 40 }}>
+      <div className="live-status">
         <span
+          className="live-status-dot"
           style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: error ? '#999' : callEnded ? '#4caf50' : '#000',
+            background: error
+              ? 'var(--color-border-strong)'
+              : callEnded
+                ? 'var(--color-good-border)'
+                : 'var(--color-accent)',
             animation: error || callEnded ? undefined : 'pulse 1.5s ease-in-out infinite',
           }}
         />
-        <span className="muted">
-          {error ? 'Disconnected' : callEnded ? 'Call ended — loading debrief...' : 'Call in progress'}
+        <span className="live-status-text">
+          {error ? 'Disconnected' : callEnded ? 'Call ended — loading your results...' : 'Call in progress'}
         </span>
         <div style={{ marginLeft: 'auto' }}>
-          <Button
-            onClick={() => setAutoscroll(!autoscroll)}
-          >
+          <Button onClick={() => setAutoscroll(!autoscroll)}>
             {autoscroll ? 'Autoscroll on' : 'Autoscroll off'}
           </Button>
         </div>
       </div>
 
       <Card>
-        <h2 className="section-title">Transcript</h2>
+        <h2 className="section-title">What is being said</h2>
         <div
           ref={containerRef}
-          style={{
-            maxHeight: 360,
-            overflowY: 'auto',
-            fontFamily: 'ui-monospace, monospace',
-            fontSize: 14,
-            lineHeight: 1.6,
-          }}
+          className="transcript"
+          style={{ maxHeight: 420, overflowY: 'auto' }}
         >
           {lines.length === 0 && !error && (
-            <p className="muted">Waiting for transcript...</p>
+            <p className="muted">Waiting for the call to start...</p>
           )}
-          {error && (
-            <p style={{ color: '#000' }}>{error}</p>
-          )}
+          {error && <p role="alert">{error}</p>}
           {lines.map((line, i) => {
             const { speaker, text } = parseLine(line)
             return (
-              <div key={i} style={{ marginBottom: 12 }}>
+              <div key={i} className="transcript-line">
                 {speaker && (
                   <span
-                    style={{
-                      display: 'inline-block',
-                      fontWeight: 600,
-                      color: speaker === 'Caller' ? 'var(--text-muted)' : 'var(--accent)',
-                      marginRight: 8,
-                    }}
+                    className={`transcript-speaker ${
+                      speaker === 'Caller' ? 'transcript-speaker-caller' : 'transcript-speaker-you'
+                    }`}
                   >
                     {speaker}:
                   </span>
@@ -132,13 +125,12 @@ export default function Live() {
             )
           })}
           {typing && (
-            <span className="muted" style={{ display: 'inline-block', marginTop: 8 }}>
-              Typing...
-            </span>
+            <p className="muted" style={{ marginTop: 'var(--space-2)' }}>
+              Speaking...
+            </p>
           )}
         </div>
       </Card>
-
     </PageContainer>
   )
 }

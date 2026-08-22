@@ -14,14 +14,9 @@ export default function Card({ children, className = '', onClick, selected }: Ca
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
       onClick={onClick}
-      className={`card ${className}`.trim()}
-      style={{
-        padding: 18,
-        borderRadius: 'var(--radius)',
-        border: 'var(--border)',
-        background: selected ? '#f5f5f5' : 'var(--bg-card)',
-        cursor: onClick ? 'pointer' : undefined,
-      }}
+      className={`card ${selected ? 'card-selected' : ''} ${onClick ? 'card-clickable' : ''} ${className}`
+        .replace(/\s+/g, ' ')
+        .trim()}
     >
       {children}
     </div>

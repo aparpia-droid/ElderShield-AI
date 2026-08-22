@@ -6,6 +6,8 @@ interface InputProps {
   label?: string
   id?: string
   className?: string
+  /** id of an element describing the field, announced after the label. */
+  describedBy?: string
 }
 
 export default function Input({
@@ -16,21 +18,13 @@ export default function Input({
   label,
   id,
   className = '',
+  describedBy,
 }: InputProps) {
   const inputId = id || `input-${Math.random().toString(36).slice(2)}`
   return (
-    <div className={className} style={{ marginBottom: className ? 0 : 20 }}>
+    <div className={`field ${className}`.trim()}>
       {label && (
-        <label
-          htmlFor={inputId}
-          style={{
-            display: 'block',
-            fontSize: 13,
-            fontWeight: 500,
-            color: 'var(--text-muted)',
-            marginBottom: 6,
-          }}
-        >
+        <label htmlFor={inputId} className="field-label">
           {label}
         </label>
       )}
@@ -40,16 +34,8 @@ export default function Input({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        style={{
-          width: '100%',
-          padding: '10px 14px',
-          fontSize: 16,
-          fontFamily: 'var(--font-body)',
-          borderRadius: 'var(--radius)',
-          border: 'var(--border)',
-          background: 'var(--bg-card)',
-          color: 'var(--text)',
-        }}
+        aria-describedby={describedBy}
+        className="field-input"
       />
     </div>
   )

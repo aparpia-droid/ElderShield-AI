@@ -22,28 +22,7 @@ export default function Button({
       type={type}
       disabled={disabled}
       onClick={onClick}
-      className={className}
-      style={{
-        padding: '10px 20px',
-        fontSize: 15,
-        fontWeight: 600,
-        fontFamily: 'var(--font-heading)',
-        borderRadius: 'var(--radius)',
-        border: primary ? 'none' : 'var(--border)',
-        background: primary ? 'var(--accent)' : 'transparent',
-        color: primary ? '#fff' : 'var(--text)',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
-      }}
-      onMouseOver={(e) => {
-        if (disabled) return
-        if (primary) e.currentTarget.style.background = 'var(--accent-hover)'
-        else e.currentTarget.style.background = '#f5f5f5'
-      }}
-      onMouseOut={(e) => {
-        if (primary) e.currentTarget.style.background = 'var(--accent)'
-        else e.currentTarget.style.background = 'transparent'
-      }}
+      className={`btn ${primary ? 'btn-primary' : 'btn-secondary'} ${className}`.trim()}
     >
       {children}
     </button>

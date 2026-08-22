@@ -453,9 +453,87 @@ app.get('/api/sessions/:sessionId', (req, res) => {
     score: sr?.score ?? null,
     tier: sr?.tier ?? null,
     explanation: sr?.explanation ?? null,
+    lineFindings: sr?.lineFindings ?? null,
     status: s.status ?? 'in_progress',
   })
 })
+
+/**
+ * Line-level attribution for the debrief transcript.
+ *
+ * This is deliberately a SEPARATE Groq call. The scoring request below is left
+ * byte-for-byte untouched — same system prompt, same user content, same model
+ * and temperature — so scores stay reproducible while the rubric is under
+ * review. This call only labels lines; it never produces or adjusts a score.
+ *
+ * Returns [] on any failure, so a missing annotation can never break scoring.
+ */
+const LINE_FINDING_SYSTEM_PROMPT = `You annotate a scam-simulation transcript for a training debrief. You do NOT score it.
+
+Every line is prefixed with its index in square brackets, for example: [4] You: my date of birth is March 3rd.
+
+Return findings ONLY for lines spoken by the test subject — the lines that begin with "You:" after the index. Ignore every "Caller:" line.
+
+Mark a line "risk" when the subject revealed information a scammer could use, agreed to a scammer's request, or complied under pressure.
+Mark a line "good" when the subject refused, questioned or challenged the caller, said they would verify independently, named the call as a scam, or ended the call.
+
+Leave out lines that are neither. Never return an index that does not appear in the transcript.
+
+For each finding write a "note" of at most 20 words, addressed to the subject as "You ...", saying plainly what was wrong or right and why it matters. For example: "You gave your date of birth — that can never be changed once a scammer has it."
+
+Return ONLY valid JSON with no markdown:
+{
+  "lineFindings": [
+    { "index": <number>, "type": "risk" | "good", "note": "<short plain-language note>" }
+  ]
+}`;
+
+async function analyzeLineFindings(transcript, label) {
+  const numbered = transcript.map((line, i) => `[${i}] ${line}`).join('\n');
+
+  const response = await axios.post(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: LINE_FINDING_SYSTEM_PROMPT },
+        { role: 'user', content: `Scenario: ${label}\n\nTranscript:\n${numbered}` },
+      ],
+      temperature: 0,
+    },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+      },
+      timeout: 30000,
+    }
+  );
+
+  let raw = response.data?.choices?.[0]?.message?.content || '';
+  raw = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+  const parsed = JSON.parse(raw);
+  const findings = Array.isArray(parsed?.lineFindings) ? parsed.lineFindings : [];
+
+  // Drop anything that does not point at a real subject line.
+  return findings
+    .filter((f) => Number.isInteger(f?.index) && f.index >= 0 && f.index < transcript.length)
+    .filter((f) => f.type === 'risk' || f.type === 'good')
+    .filter((f) => /^You:/i.test(transcript[f.index]))
+    .filter((f) => typeof f.note === 'string' && f.note.trim().length > 0)
+    .map((f) => ({ index: f.index, type: f.type, note: f.note.trim() }));
+}
+
+/** Never let annotation failures affect the scoring response. */
+async function safeLineFindings(transcript, label) {
+  try {
+    return await analyzeLineFindings(transcript, label);
+  } catch (err) {
+    console.error('Line attribution failed:', err.response?.data || err.message);
+    return [];
+  }
+}
 
 app.post('/api/sessions/:sessionId/score', async (req, res) => {
   const { sessionId } = req.params;
@@ -604,6 +682,9 @@ Return ONLY valid JSON with no markdown:
       console.error("Groq returned invalid JSON:", raw);
       return res.status(502).json({ error: "Invalid JSON from scorer" });
     }
+
+    // Additive only — attribution runs after scoring and cannot alter it.
+    result.lineFindings = await safeLineFindings(session.transcript, label);
 
     session.score = result;
 

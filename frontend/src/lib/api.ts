@@ -41,6 +41,16 @@ export async function startSession(
   return res.json()
 }
 
+/**
+ * One annotated line of the transcript, produced by the backend alongside the
+ * score. `index` refers to a position in `transcript`.
+ */
+export interface LineFinding {
+  index: number
+  type: 'risk' | 'good'
+  note: string
+}
+
 export interface SessionData {
   sessionId: string
   status: 'pending' | 'in_progress' | 'completed'
@@ -49,6 +59,8 @@ export interface SessionData {
   /** Risk tier: Scam-Proof | Cautious | Aware but Exposed | Vulnerable | High Risk | Compromised */
   tier: string | null
   explanation: string | null
+  /** Absent on older sessions or if annotation failed — always guard. */
+  lineFindings?: LineFinding[] | null
 }
 
 export async function getSession(sessionId: string): Promise<SessionData> {

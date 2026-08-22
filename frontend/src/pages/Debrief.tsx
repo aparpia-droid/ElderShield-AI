@@ -1,25 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getSession, type SessionData } from '../lib/api'
+import { getSession, type LineFinding, type SessionData } from '../lib/api'
+import { gradeForScore } from '../lib/grades'
 import PageContainer from '../ui/PageContainer'
 import Card from '../ui/Card'
 import Button from '../ui/Button'
-import Badge from '../ui/Badge'
-
-type BadgeVariant = 'green' | 'yellow' | 'orange' | 'red' | 'neutral'
-
-function tierVariant(tier: string | null): BadgeVariant {
-  if (tier === 'Scam-Proof') return 'green'
-  if (tier === 'Cautious') return 'green'
-  if (tier === 'Aware but Exposed') return 'yellow'
-  if (tier === 'Vulnerable') return 'orange'
-  if (tier === 'High Risk') return 'red'
-  if (tier === 'Compromised') return 'red'
-  return 'neutral'
-}
-
-/** Keywords that suggest risky disclosure */
-const RISKY_PATTERNS = /ssn|social security|account number|routing|dob|date of birth|birth date|password|pin\b|credit card|bank account|maiden name|passcode|2fa|otp|verification code|gift card/i
 
 /** Tips by risk tier (matches PDF 6-tier system) */
 const TIPS: Record<string, string[]> = {
@@ -65,16 +50,19 @@ function getTips(tier: string | null): string[] {
   return TIPS['Compromised']
 }
 
-/** Highlight risky transcript lines */
-function isRiskyLine(line: string): boolean {
-  return RISKY_PATTERNS.test(line)
-}
-
 /** Parse line into speaker + text */
 function parseLine(line: string): { speaker: string; text: string } {
   const m = line.match(/^(Caller|You):\s*(.*)$/i)
   if (m) return { speaker: m[1], text: m[2] }
   return { speaker: '', text: line }
+}
+
+/** Index the backend's findings by transcript line for lookup while rendering. */
+function indexFindings(findings: LineFinding[] | null | undefined): Map<number, LineFinding> {
+  const map = new Map<number, LineFinding>()
+  if (!findings) return map
+  for (const f of findings) map.set(f.index, f)
+  return map
 }
 
 export default function Debrief() {
@@ -115,102 +103,121 @@ export default function Debrief() {
   }, [sessionId])
 
   if (!sessionId) return <PageContainer><p>Missing session</p></PageContainer>
-  if (error) return <PageContainer><p style={{ color: '#000' }}>{error}</p></PageContainer>
-  if (!data) return <PageContainer><p>Loading debrief...</p></PageContainer>
+  if (error) return <PageContainer><p role="alert">{error}</p></PageContainer>
+  if (!data) return <PageContainer><p>Loading your results...</p></PageContainer>
 
   const tips = getTips(data.tier)
+  const band = data.score == null ? null : gradeForScore(data.score)
+  const findings = indexFindings(data.lineFindings)
+  const hasAnnotations = findings.size > 0
 
   return (
     <PageContainer>
-      <h1>Debrief</h1>
-      <p className="muted" style={{ marginBottom: 40 }}>
-        Your vulnerability score and what to improve.
+      <h1>How your call went</h1>
+      <p className="muted" style={{ marginBottom: 'var(--space-7)' }}>
+        Here is your grade, what you said, and what to do differently next time.
       </p>
 
-      <div style={{ marginBottom: 40 }}>
-        <h2 className="section-title">Vulnerability score</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
-          <Badge variant={tierVariant(data.tier)}>
-            {data.score == null ? 'Scoring...' : `${data.score}/100`}
-          </Badge>
-          <span style={{ fontWeight: 500 }}>
-            {data.score == null ? 'Finalizing results' : `${data.tier}`}
-          </span>
-        </div>
-        {data.explanation && (
-          <pre style={{
-            fontFamily: 'ui-monospace, monospace',
-            fontSize: 13,
-            lineHeight: 1.6,
-            whiteSpace: 'pre-wrap',
-            color: 'var(--text-muted)',
-            margin: 0,
-          }}>
-            {data.explanation}
-          </pre>
+      <section style={{ marginBottom: 'var(--space-8)' }}>
+        <h2 className="section-title">Your grade</h2>
+        {band == null ? (
+          <p>Working out your grade...</p>
+        ) : (
+          <>
+            <div className="grade-panel">
+              <div
+                className="grade-letter"
+                style={{ color: band.fg, background: band.bg }}
+                aria-hidden="true"
+              >
+                {band.grade}
+              </div>
+              <div className="grade-meta">
+                <p className="grade-tier">
+                  <span className="visually-hidden">Grade {band.grade}. </span>
+                  {data.tier}
+                </p>
+                <p className="grade-caption">
+                  Grades run from A (best) down to F. Yours is a {band.grade}.
+                </p>
+                <p className="grade-score">Points: {data.score} out of 100</p>
+              </div>
+            </div>
+            {data.explanation && <p className="grade-explanation">{data.explanation}</p>}
+          </>
         )}
-      </div>
+      </section>
 
-      <div style={{ marginBottom: 40 }}>
-        <h2 className="section-title">Transcript</h2>
+      <section style={{ marginBottom: 'var(--space-8)' }}>
+        <h2 className="section-title">What you said</h2>
+        <p className="muted" style={{ marginBottom: 'var(--space-4)' }}>
+          {hasAnnotations
+            ? 'Lines marked "Mistake" are the ones that put you at risk. Lines marked "Good move" are the ones that protected you.'
+            : 'Your full conversation, word for word.'}
+        </p>
         <Card>
-          <div
-            style={{
-              fontFamily: 'ui-monospace, monospace',
-              fontSize: 14,
-              lineHeight: 1.7,
-            }}
-          >
+          <div className="transcript">
             {data.transcript.length === 0 ? (
               <p className="muted">No transcript</p>
             ) : (
               data.transcript.map((line, i) => {
                 const { speaker, text } = parseLine(line)
-                const risky = isRiskyLine(line)
+                const finding = findings.get(i)
+                const tone = finding?.type
                 return (
                   <div
                     key={i}
-                    style={{
-                      marginBottom: 12,
-                      padding: risky ? '8px 12px' : undefined,
-                      background: risky ? '#f0f0f0' : undefined,
-                      borderRadius: risky ? 'var(--radius)' : undefined,
-                      borderLeft: risky ? '2px solid #000' : undefined,
-                    }}
+                    className={`transcript-line ${
+                      tone === 'risk'
+                        ? 'transcript-line-risk'
+                        : tone === 'good'
+                          ? 'transcript-line-good'
+                          : ''
+                    }`.trim()}
                   >
                     {speaker && (
                       <span
-                        style={{
-                          fontWeight: 600,
-                          color: speaker === 'Caller' ? 'var(--text-muted)' : 'var(--accent)',
-                          marginRight: 8,
-                        }}
+                        className={`transcript-speaker ${
+                          speaker.toLowerCase() === 'caller'
+                            ? 'transcript-speaker-caller'
+                            : 'transcript-speaker-you'
+                        }`}
                       >
                         {speaker}:
                       </span>
                     )}
                     {text}
+                    {finding && (
+                      <span
+                        className={`transcript-note ${
+                          tone === 'risk' ? 'transcript-note-risk' : 'transcript-note-good'
+                        }`}
+                      >
+                        <span className="transcript-note-label">
+                          {tone === 'risk' ? 'Mistake' : 'Good move'}
+                        </span>
+                        {finding.note}
+                      </span>
+                    )}
                   </div>
                 )
               })
             )}
           </div>
         </Card>
-      </div>
+      </section>
 
-      <div style={{ marginBottom: 40 }}>
-        <h2 className="section-title">Tips</h2>
-        <ul style={{ paddingLeft: 20, margin: 0 }}>
+      <section style={{ marginBottom: 'var(--space-8)' }}>
+        <h2 className="section-title">Tips for next time</h2>
+        <ul className="tips-list">
           {tips.map((tip, i) => (
-            <li key={i} style={{ marginBottom: 12 }}>
-              {tip}
-            </li>
+            <li key={i}>{tip}</li>
           ))}
         </ul>
-      </div>
+      </section>
 
       <Button primary onClick={() => navigate('/')}>
-        Try another scenario
+        Try another practice call
       </Button>
     </PageContainer>
   )
