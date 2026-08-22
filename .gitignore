@@ -35,3 +35,6 @@ FraudGuard.AI/
 
 # Temporary audio files from ElevenLabs
 temp_audio/
+
+# Claude Code local settings
+.claude/settings.local.json
