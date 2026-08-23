@@ -3,7 +3,7 @@ console.log("SERVER BOOTED FROM:", process.cwd());
 console.log("SERVER FILE:", __filename);
 console.log("ELEVEN KEY PRESENT:", !!process.env.ELEVENLABS_API_KEY, "LEN:", (process.env.ELEVENLABS_API_KEY || "").length);
 console.log("ELEVEN KEY PREFIX:", (process.env.ELEVENLABS_API_KEY || "").slice(0, 6));
-console.log("GROQ KEY:", process.env.GROQ_API_KEY);
+console.log("GROQ KEY PRESENT:", !!process.env.GROQ_API_KEY, "LEN:", (process.env.GROQ_API_KEY || "").length);
 
 process.on("unhandledRejection", (reason) => {
   console.error("UNHANDLED REJECTION:", reason);
@@ -25,6 +25,49 @@ const http = require("http");
 const WebSocket = require("ws");
 // child_process no longer needed - using pure JS audio transcoding
 const prism = require("prism-media");
+
+/**
+ * Groq model used for BOTH scoring and transcript attribution.
+ *
+ * Pinned deliberately. Every score records the model that produced it (the
+ * `scoringModel` field on the score response and on the stored session), so any
+ * result can be traced back to the model version that generated it. This is the
+ * only place the id appears — change it here and both calls follow.
+ */
+const SCORING_MODEL = 'openai/gpt-oss-120b';
+
+console.log("SCORING MODEL:", SCORING_MODEL);
+
+/**
+ * Non-fatal boot check: ask Groq whether the pinned model is still available.
+ * A decommissioned model previously surfaced only as a permanently blank grade
+ * in the debrief; this turns it into an obvious line in the startup logs.
+ */
+async function checkScoringModel() {
+  if (!process.env.GROQ_API_KEY) {
+    console.error("SCORING MODEL CHECK: skipped — GROQ_API_KEY is not set");
+    return;
+  }
+  try {
+    const res = await axios.get('https://api.groq.com/openai/v1/models', {
+      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+      timeout: 15000,
+    });
+    const ids = (res.data?.data || []).map((m) => m.id);
+    if (ids.includes(SCORING_MODEL)) {
+      console.log(`SCORING MODEL CHECK: ok — "${SCORING_MODEL}" is available`);
+    } else {
+      console.error(
+        `SCORING MODEL CHECK: FAILED — "${SCORING_MODEL}" is not available to this key. ` +
+        `Scoring will 404 until SCORING_MODEL is updated. Available: ${ids.join(', ')}`
+      );
+    }
+  } catch (err) {
+    console.error("SCORING MODEL CHECK: could not reach Groq:", err.response?.status || err.message);
+  }
+}
+
+checkScoringModel();
 
 const app = express();
 app.use((req, res, next) => {
@@ -421,6 +464,7 @@ app.post("/api/sessions/start", async (req, res) => {
       transcript: [],
       status: "in_progress",
       score: null,
+      scoreError: null,
     };
 
     const call = await client.calls.create({
@@ -454,6 +498,8 @@ app.get('/api/sessions/:sessionId', (req, res) => {
     tier: sr?.tier ?? null,
     explanation: sr?.explanation ?? null,
     lineFindings: sr?.lineFindings ?? null,
+    scoringModel: sr?.scoringModel ?? null,
+    scoringError: s.scoreError ?? null,
     status: s.status ?? 'in_progress',
   })
 })
@@ -494,7 +540,7 @@ async function analyzeLineFindings(transcript, label) {
   const response = await axios.post(
     'https://api.groq.com/openai/v1/chat/completions',
     {
-      model: 'llama-3.3-70b-versatile',
+      model: SCORING_MODEL,
       messages: [
         { role: 'system', content: LINE_FINDING_SYSTEM_PROMPT },
         { role: 'user', content: `Scenario: ${label}\n\nTranscript:\n${numbered}` },
@@ -555,7 +601,7 @@ app.post('/api/sessions/:sessionId/score', async (req, res) => {
     const groqResponse = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
       {
-        model: 'llama-3.3-70b-versatile',
+        model: SCORING_MODEL,
         messages: [
           {
             role: 'system',
@@ -683,17 +729,25 @@ Return ONLY valid JSON with no markdown:
       return res.status(502).json({ error: "Invalid JSON from scorer" });
     }
 
+    // Recorded so every score can be traced back to the model that produced it.
+    result.scoringModel = SCORING_MODEL;
+
     // Additive only — attribution runs after scoring and cannot alter it.
     result.lineFindings = await safeLineFindings(session.transcript, label);
 
     session.score = result;
+    session.scoreError = null;
 
     broadcastToBrowsers(sessionId, { type: "score", score: result });
 
     return res.json(result);
 
   } catch (err) {
-    console.error("Scoring error:", err.response?.data || err.message);
+    const detail = err.response?.data?.error?.message || err.response?.data || err.message;
+    console.error("Scoring error:", detail, "| model:", SCORING_MODEL);
+    // Surfaced to the debrief so a dead scorer reads as an error, not a spinner.
+    session.scoreError =
+      typeof detail === 'string' ? detail : JSON.stringify(detail);
     return res.status(500).json({ error: err.message });
   }
 });
@@ -938,7 +992,14 @@ setTimeout(() => {
 
   axios
     .post(`${process.env.BASE_URL}/api/sessions/${sessionId}/score`)
-    .catch((e) => console.log("auto-score failed:", e.message));
+    .catch((e) => {
+      console.error("auto-score failed:", e.message);
+      const sess = sessions[sessionId];
+      // Keep the specific reason the score route already recorded, if any.
+      if (sess && !sess.score && !sess.scoreError) {
+        sess.scoreError = `Scoring request failed: ${e.message}`;
+      }
+    });
 }, 1200);
   }
 

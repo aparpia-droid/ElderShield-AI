@@ -84,8 +84,9 @@ export default function Debrief() {
         if (cancelled) return
         setData(s)
 
-        // keep polling until backend has produced a score
-        if (s.score === null) {
+        // Keep polling until the backend produces a score. A recorded
+        // scoringError means one is never coming, so stop and show it.
+        if (s.score === null && !s.scoringError) {
           timer = window.setTimeout(load, 1200)
         }
       } catch (e) {
@@ -120,7 +121,19 @@ export default function Debrief() {
 
       <section style={{ marginBottom: 'var(--space-8)' }}>
         <h2 className="section-title">Your grade</h2>
-        {band == null ? (
+        {data.scoringError ? (
+          <div className="alert-error" role="alert">
+            <p className="alert-error-title">We could not grade this call</p>
+            <p className="alert-error-body">
+              The service that marks these calls did not respond, so there is no
+              grade this time. Nothing you did caused this, and your conversation
+              below is complete. Please try another practice call.
+            </p>
+            <p className="alert-error-detail">
+              Technical details: {data.scoringError}
+            </p>
+          </div>
+        ) : band == null ? (
           <p>Working out your grade...</p>
         ) : (
           <>
@@ -140,7 +153,10 @@ export default function Debrief() {
                 <p className="grade-caption">
                   Grades run from A (best) down to F. Yours is a {band.grade}.
                 </p>
-                <p className="grade-score">Points: {data.score} out of 100</p>
+                <p className="grade-score">
+                  Points: {data.score} out of 100
+                  {data.scoringModel ? ` · Scored by ${data.scoringModel}` : ''}
+                </p>
               </div>
             </div>
             {data.explanation && <p className="grade-explanation">{data.explanation}</p>}

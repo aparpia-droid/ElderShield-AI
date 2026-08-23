@@ -61,6 +61,10 @@ export interface SessionData {
   explanation: string | null
   /** Absent on older sessions or if annotation failed — always guard. */
   lineFindings?: LineFinding[] | null
+  /** Groq model that produced the score, recorded for auditability. */
+  scoringModel?: string | null
+  /** Set when scoring failed. Present means there will never be a score. */
+  scoringError?: string | null
 }
 
 export async function getSession(sessionId: string): Promise<SessionData> {

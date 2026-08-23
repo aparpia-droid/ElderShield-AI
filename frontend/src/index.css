@@ -725,6 +725,34 @@ p {
   margin: var(--space-5) 0 0 0;
 }
 
+/* Scoring failure. Deliberately loud: a dead scorer used to look like a
+   spinner that never resolved. */
+.alert-error {
+  background: var(--color-risk-bg);
+  border: 2px solid var(--color-risk-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+}
+
+.alert-error-title {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  color: #8c1319;
+  margin: 0 0 var(--space-3) 0;
+}
+
+.alert-error-body {
+  font-size: var(--text-base);
+  color: var(--color-text);
+  margin: 0;
+}
+
+.alert-error-detail {
+  font-size: var(--text-base);
+  color: var(--color-text-muted);
+  margin: var(--space-4) 0 0 0;
+}
+
 /* ---------- Transcript ---------- */
 .transcript {
   font-family: var(--font-body);
