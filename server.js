@@ -609,16 +609,32 @@ app.post('/api/verify-code', verifyCodeHandler);
 // ✅ match frontend: POST /api/sessions/start
 // scenario -> agent mapping
 const SCENARIO_TO_AGENT = {
+  // Older-adult scenarios
   social_security: process.env.AGENT_SOCIAL_SECURITY,
   tech_support: process.env.AGENT_APPLE_SUPPORT,
   lottery_giveaway: process.env.AGENT_LOTTERY,
+  // Student scenarios (user study). financial_aid and campus_it are matched
+  // for difficulty; internship_offer is intentionally easier.
+  financial_aid: process.env.AGENT_FINANCIAL_AID,
+  campus_it: process.env.AGENT_CAMPUS_IT,
+  internship_offer: process.env.AGENT_INTERNSHIP,
 };
 
 const SCAM_LABELS = {
   social_security: 'Social Security Suspension',
   tech_support: 'Apple Tech Support',
   lottery_giveaway: 'Lottery / Giveaway',
+  financial_aid: 'University Financial Aid / Bursar',
+  campus_it: 'Campus IT Account Suspension',
+  internship_offer: 'Paid Internship Offer',
 };
+
+// Boot check: a scenario with no agent would silently fall back to the default
+// agent and mis-tag the study data, so say so up front.
+for (const [id, agent] of Object.entries(SCENARIO_TO_AGENT)) {
+  if (agent) console.log(`SCENARIO AGENT: ok — ${id}`);
+  else console.error(`SCENARIO AGENT: MISSING — ${id} has no agent id set; calls for it will be refused`);
+}
 
 app.post("/api/sessions/start", async (req, res) => {
   try {
@@ -635,11 +651,18 @@ app.post("/api/sessions/start", async (req, res) => {
 
     const sessionId = uuidv4();
 
-    const agentId =
-      SCENARIO_TO_AGENT[scenarioId] || process.env.ELEVEN_AGENT_ID_DEFAULT;
+    // Known scenarios must use their own agent — never the default — or the
+    // session would be tagged with one scam while the caller played another.
+    const isKnownScenario = Object.prototype.hasOwnProperty.call(SCENARIO_TO_AGENT, scenarioId);
+    const agentId = isKnownScenario
+      ? SCENARIO_TO_AGENT[scenarioId]
+      : process.env.ELEVEN_AGENT_ID_DEFAULT;
 
     if (!agentId) {
-      return res.status(500).json({ error: "Missing agentId for scenario (check .env)" });
+      console.error(`❌ /api/sessions/start refused: no agent configured for scenario "${scenarioId}"`);
+      return res.status(500).json({
+        error: `This practice call is not set up yet (no agent configured for "${scenarioId}"). Please choose a different one.`,
+      });
     }
 
     sessions[sessionId] = {

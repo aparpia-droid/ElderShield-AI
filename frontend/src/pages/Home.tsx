@@ -29,6 +29,24 @@ const SCENARIOS = [
     description:
       'The caller says you have won money or a prize. To claim it, they will ask you for a fee, your bank details, or other personal information.',
   },
+  {
+    id: 'financial_aid',
+    label: 'The financial aid office call',
+    description:
+      'The caller says they are from the university bursar, that a tuition payment has failed, and that your enrolment will be dropped today. They will ask for your student ID and date of birth, then your banking details or a code texted to your phone.',
+  },
+  {
+    id: 'campus_it',
+    label: 'The campus IT call',
+    description:
+      'The caller says university IT has spotted suspicious logins on your account and it will be locked unless you verify it right now. They will ask you to install a remote-access tool and read back a two-factor code.',
+  },
+  {
+    id: 'internship_offer',
+    label: 'The internship offer call',
+    description:
+      'The caller offers you a paid remote internship you supposedly applied for. They will ask for personal details for onboarding, then bank details for direct deposit, then an upfront payment for equipment.',
+  },
 ]
 
 /** Basic phone validation: at least 10 digits */
@@ -181,7 +199,7 @@ export default function Home() {
             <li className="home-step">
               <span className="home-step-title">You choose a type of call</span>
               <span className="home-step-text">
-                Pick one of the three practice calls further down this page.
+                Pick one of the practice calls further down this page.
               </span>
             </li>
             <li className="home-step">
@@ -264,7 +282,7 @@ export default function Home() {
         <section className="home-section">
           <h2 className="home-section-title">Choose your practice call</h2>
           <p className="home-section-intro">
-            All three work the same way. Pick whichever one you would like to practise.
+            They all work the same way. Pick whichever one you would like to practise.
           </p>
           <div className="home-scenario-grid" role="radiogroup" aria-label="Choose your practice call">
             {SCENARIOS.map((s) => {
