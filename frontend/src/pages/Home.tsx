@@ -9,6 +9,7 @@ import {
   storeParticipantCode,
 } from '../lib/participants'
 import Input from '../ui/Input'
+import ScenarioIcon from '../ui/ScenarioIcon'
 
 const SCENARIOS = [
   {
@@ -192,7 +193,7 @@ export default function Home() {
           </p>
         </section>
 
-        {/* 2. What will happen */}
+        {/* 2. What will happen — white band */}
         <section className="home-section">
           <h2 className="home-section-title">What will happen</h2>
           <ol className="home-steps">
@@ -225,7 +226,7 @@ export default function Home() {
         </section>
 
         {/* 3. What you'll learn */}
-        <section className="home-section">
+        <section className="home-section home-section-alt">
           <h2 className="home-section-title">What you will find out afterwards</h2>
           <div className="home-panel">
             <ul className="home-panel-list">
@@ -279,7 +280,7 @@ export default function Home() {
         </section>
 
         {/* 5. Pick a scenario */}
-        <section className="home-section">
+        <section className="home-section home-section-alt">
           <h2 className="home-section-title">Choose your practice call</h2>
           <p className="home-section-intro">
             They all work the same way. Pick whichever one you would like to practise.
@@ -299,8 +300,13 @@ export default function Home() {
                   <span className="home-scenario-marker" aria-hidden="true">
                     {selected ? '✓' : ''}
                   </span>
-                  <span className="home-scenario-title">{s.label}</span>
-                  <span className="home-scenario-desc">{s.description}</span>
+                  <span className="home-scenario-icon" aria-hidden="true">
+                    <ScenarioIcon scenario={s.id} size={36} />
+                  </span>
+                  <span className="home-scenario-body">
+                    <span className="home-scenario-title">{s.label}</span>
+                    <span className="home-scenario-desc">{s.description}</span>
+                  </span>
                 </button>
               )
             })}
@@ -308,7 +314,7 @@ export default function Home() {
         </section>
 
         {/* 6. Phone number — deliberately last */}
-        <section className="home-section">
+        <section className="home-section home-action">
           <h2 className="home-section-title">Where should we call you?</h2>
           <div className="home-phone-panel">
             <Input

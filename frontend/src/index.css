@@ -50,13 +50,15 @@
   /* ---- Type ---- */
   --font-body: 'DM Sans', system-ui, -apple-system, sans-serif;
   --font-display: 'Syne', 'DM Sans', system-ui, sans-serif;
-  --text-xs: 16px;   /* floor — incidental labels only */
-  --text-base: 18px; /* body minimum */
-  --text-md: 20px;
-  --text-lg: 23px;
-  --text-xl: 28px;
-  --text-2xl: 34px;
-  --text-3xl: 42px;
+  /* Scaled up ~11% for an older audience unlikely to zoom the page. The whole
+     ramp moves together, so proportions between elements are unchanged. */
+  --text-xs: 18px;   /* floor — incidental labels only */
+  --text-base: 20px; /* body minimum */
+  --text-md: 22px;
+  --text-lg: 26px;
+  --text-xl: 31px;
+  --text-2xl: 38px;
+  --text-3xl: 47px;
   --leading-body: 1.6;
   --leading-tight: 1.25;
   --weight-normal: 400;
@@ -486,8 +488,32 @@ p {
   font-weight: var(--weight-bold);
 }
 
+/* Each major section is its own padded band so the reader can see where one
+   ends and the next begins. Bands alternate white and a very pale neutral. */
 .home-section {
-  margin-bottom: var(--space-8);
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-4);
+  background: var(--color-surface);
+}
+
+.home-section-alt {
+  background: var(--color-surface-alt);
+}
+
+/* The action band — where reading stops and doing begins. Deliberately the
+   heaviest frame on the page so it is unmistakably the point. */
+.home-action {
+  background: var(--color-primary-tint);
+  border: 3px solid var(--color-primary);
+  padding: var(--space-7) var(--space-6);
+  margin-top: var(--space-6);
+}
+
+.home-action .home-section-title {
+  font-size: var(--text-2xl);
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
 }
 
 .home-section-title {
@@ -623,10 +649,12 @@ p {
 
 .home-scenario-card {
   position: relative;
-  display: block;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
   width: 100%;
   min-height: var(--tap-min);
-  padding: var(--space-5) var(--space-6) var(--space-5) 64px;
+  padding: var(--space-5) 56px var(--space-5) var(--space-5);
   border-radius: var(--radius-lg);
   border: 2px solid var(--color-border);
   background: var(--color-surface);
@@ -647,11 +675,28 @@ p {
   background: var(--color-primary-tint);
 }
 
+/* Scenario icon, in a tinted disc, coloured to match the card state. */
+.home-scenario-icon {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--color-primary-tint);
+  color: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-scenario-body {
+  min-width: 0;
+}
+
 /* Radio indicator: shape changes as well as colour, so selection is not
    signalled by colour alone. */
 .home-scenario-marker {
   position: absolute;
-  left: var(--space-5);
+  right: var(--space-5);
   top: var(--space-5);
   width: 28px;
   height: 28px;
@@ -686,10 +731,12 @@ p {
   line-height: var(--leading-body);
 }
 
-/* Phone entry — deliberately the last thing on the page */
+/* Phone entry — deliberately the last thing on the page. The surrounding
+   .home-action band now supplies the frame, so the panel sits flush inside it
+   as a plain white surface rather than a second border. */
 .home-phone-panel {
   background: var(--color-surface);
-  border: 2px solid var(--color-primary);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   padding: var(--space-6);
 }
