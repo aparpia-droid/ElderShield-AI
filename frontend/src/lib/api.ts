@@ -47,9 +47,20 @@ export async function startSession(
  * One annotated line of the transcript, produced by the backend alongside the
  * score. `index` refers to a position in `transcript`.
  */
+/** Rubric-band severity of a single line. Absent on sessions scored before
+ *  severity was added — always guard. */
+export type FindingSeverity =
+  | 'strong'
+  | 'minor'
+  | 'recon'
+  | 'identity'
+  | 'authentication'
+  | 'critical'
+
 export interface LineFinding {
   index: number
   type: 'risk' | 'good'
+  severity?: FindingSeverity
   note: string
 }
 

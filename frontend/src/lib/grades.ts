@@ -8,6 +8,8 @@
  * This is a display mapping only. It never affects how a score is calculated.
  */
 
+import type { FindingSeverity, LineFinding } from './api'
+
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F'
 
 export interface GradeBand {
@@ -35,4 +37,49 @@ export function gradeForScore(score: number): GradeBand {
     GRADE_SCALE.find((band) => clamped >= band.min && clamped <= band.max) ??
     GRADE_SCALE[GRADE_SCALE.length - 1]
   )
+}
+
+/**
+ * Transcript-line severity scale for the debrief.
+ *
+ * Five levels from best to worst, mapped 1:1 onto the scoring rubric's own
+ * disclosure bands plus defensive behaviour, so the colours reflect the rubric
+ * rather than a parallel judgement. Never hue alone: every level carries a text
+ * label, and the label word is what a colour-blind reader relies on.
+ *
+ * Ordering, best -> worst: good behaviour, recon disclosure, identity data,
+ * authentication data, critical compromise. Per design, the second-best level
+ * is light green, not yellow — yellow first appears at the middle.
+ */
+
+export type FindingLevel = 'best' | 'good' | 'middling' | 'poor' | 'worst'
+
+export interface FindingStyle {
+  level: FindingLevel
+  /** Short word shown next to the line; the non-colour signal of severity. */
+  label: string
+  /** CSS class carrying the level's colour, defined once in index.css. */
+  className: string
+}
+
+const SEVERITY_TO_STYLE: Record<FindingSeverity, FindingStyle> = {
+  strong: { level: 'best', label: 'Great move', className: 'finding-best' },
+  minor: { level: 'best', label: 'Good move', className: 'finding-best' },
+  recon: { level: 'good', label: 'Minor slip', className: 'finding-good' },
+  identity: { level: 'middling', label: 'Risky', className: 'finding-middling' },
+  authentication: { level: 'poor', label: 'Serious', className: 'finding-poor' },
+  critical: { level: 'worst', label: 'Critical', className: 'finding-worst' },
+}
+
+/**
+ * Style for a finding. Falls back for findings scored before severity existed:
+ * a good moment reads as best, a risk as middling (yellow) — never benign.
+ */
+export function styleForFinding(finding: LineFinding): FindingStyle {
+  if (finding.severity && SEVERITY_TO_STYLE[finding.severity]) {
+    return SEVERITY_TO_STYLE[finding.severity]
+  }
+  return finding.type === 'good'
+    ? { level: 'best', label: 'Good move', className: 'finding-best' }
+    : { level: 'middling', label: 'Risky', className: 'finding-middling' }
 }

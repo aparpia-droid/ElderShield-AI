@@ -816,14 +816,23 @@ Return findings ONLY for lines spoken by the test subject — the lines that beg
 Mark a line "risk" when the subject revealed information a scammer could use, agreed to a scammer's request, or complied under pressure.
 Mark a line "good" when the subject refused, questioned or challenged the caller, said they would verify independently, named the call as a scam, or ended the call.
 
-Leave out lines that are neither. Never return an index that does not appear in the transcript.
+For every finding also give a "severity" describing how serious that single line is:
+- For a "good" line: "strong" for hanging up, refusing outright, or naming the call a scam; "minor" for milder pushback such as asking who is calling or hesitating.
+- For a "risk" line, use the category of what was exposed:
+  - "recon": low-value data a scammer collects to seem legitimate — first or full name, email, employer, confirming the phone number.
+  - "identity": identity-building data — home address, date of birth, mother's maiden name.
+  - "authentication": data used to pass security checks — last four of an SSN or card, security-question answers, a partial account number.
+  - "critical": data or actions that hand over access outright — full SSN, full card or bank number, login credentials, a one-time passcode, agreeing to send money or gift cards, or installing remote-access software.
+When a line exposes more than one thing, use the most severe category that applies.
+
+Leave out lines that are neither risk nor good. Never return an index that does not appear in the transcript.
 
 For each finding write a "note" of at most 20 words, addressed to the subject as "You ...", saying plainly what was wrong or right and why it matters. For example: "You gave your date of birth — that can never be changed once a scammer has it."
 
 Return ONLY valid JSON with no markdown:
 {
   "lineFindings": [
-    { "index": <number>, "type": "risk" | "good", "note": "<short plain-language note>" }
+    { "index": <number>, "type": "risk" | "good", "severity": "<one of: strong, minor, recon, identity, authentication, critical>", "note": "<short plain-language note>" }
   ]
 }`;
 
@@ -855,13 +864,30 @@ async function analyzeLineFindings(transcript, label) {
   const parsed = JSON.parse(raw);
   const findings = Array.isArray(parsed?.lineFindings) ? parsed.lineFindings : [];
 
+  const GOOD_SEVERITY = new Set(['strong', 'minor']);
+  const RISK_SEVERITY = new Set(['recon', 'identity', 'authentication', 'critical']);
+
+  // Coerce severity into a value valid for the finding's type. An unusable
+  // value never reads as benign: a risk falls back to "identity" (mid scale),
+  // a good moment to "minor".
+  const cleanSeverity = (type, severity) => {
+    const s = String(severity || '').toLowerCase();
+    if (type === 'good') return GOOD_SEVERITY.has(s) ? s : 'minor';
+    return RISK_SEVERITY.has(s) ? s : 'identity';
+  };
+
   // Drop anything that does not point at a real subject line.
   return findings
     .filter((f) => Number.isInteger(f?.index) && f.index >= 0 && f.index < transcript.length)
     .filter((f) => f.type === 'risk' || f.type === 'good')
     .filter((f) => /^You:/i.test(transcript[f.index]))
     .filter((f) => typeof f.note === 'string' && f.note.trim().length > 0)
-    .map((f) => ({ index: f.index, type: f.type, note: f.note.trim() }));
+    .map((f) => ({
+      index: f.index,
+      type: f.type,
+      severity: cleanSeverity(f.type, f.severity),
+      note: f.note.trim(),
+    }));
 }
 
 /** Never let annotation failures affect the scoring response. */

@@ -1,10 +1,32 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { getSession, type LineFinding, type SessionData } from '../lib/api'
-import { gradeForScore } from '../lib/grades'
+import { gradeForScore, styleForFinding } from '../lib/grades'
 import PageContainer from '../ui/PageContainer'
 import Card from '../ui/Card'
 import Button from '../ui/Button'
+
+/** Key to the five-level highlighting, so the colours are never the only cue. */
+const LEGEND: { className: string; label: string }[] = [
+  { className: 'finding-best', label: 'Good move' },
+  { className: 'finding-good', label: 'Minor slip' },
+  { className: 'finding-middling', label: 'Risky' },
+  { className: 'finding-poor', label: 'Serious' },
+  { className: 'finding-worst', label: 'Critical' },
+]
+
+function TranscriptLegend() {
+  return (
+    <ul className="transcript-legend" aria-label="What the highlight colours mean">
+      {LEGEND.map((item) => (
+        <li key={item.className} className={`transcript-legend-item ${item.className}`}>
+          <span className="transcript-legend-swatch" aria-hidden="true" />
+          {item.label}
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 /** Tips by risk tier (matches PDF 6-tier system) */
 const TIPS: Record<string, string[]> = {
@@ -179,9 +201,10 @@ export default function Debrief() {
         <h2 className="section-title">What you said</h2>
         <p className="muted" style={{ marginBottom: 'var(--space-4)' }}>
           {hasAnnotations
-            ? 'Lines marked "Mistake" are the ones that put you at risk. Lines marked "Good move" are the ones that protected you.'
+            ? 'Each highlighted line carries a label showing how risky it was, from a minor slip up to critical. Green lines are the ones that protected you.'
             : 'Your full conversation, word for word.'}
         </p>
+        {hasAnnotations && <TranscriptLegend />}
         <Card>
           <div className="transcript">
             {data.transcript.length === 0 ? (
@@ -190,17 +213,11 @@ export default function Debrief() {
               data.transcript.map((line, i) => {
                 const { speaker, text } = parseLine(line)
                 const finding = findings.get(i)
-                const tone = finding?.type
+                const style = finding ? styleForFinding(finding) : null
                 return (
                   <div
                     key={i}
-                    className={`transcript-line ${
-                      tone === 'risk'
-                        ? 'transcript-line-risk'
-                        : tone === 'good'
-                          ? 'transcript-line-good'
-                          : ''
-                    }`.trim()}
+                    className={`transcript-line ${style ? style.className : ''}`.trim()}
                   >
                     {speaker && (
                       <span
@@ -214,15 +231,9 @@ export default function Debrief() {
                       </span>
                     )}
                     {text}
-                    {finding && (
-                      <span
-                        className={`transcript-note ${
-                          tone === 'risk' ? 'transcript-note-risk' : 'transcript-note-good'
-                        }`}
-                      >
-                        <span className="transcript-note-label">
-                          {tone === 'risk' ? 'Mistake' : 'Good move'}
-                        </span>
+                    {finding && style && (
+                      <span className="transcript-note">
+                        <span className="transcript-note-label">{style.label}</span>
                         {finding.note}
                       </span>
                     )}

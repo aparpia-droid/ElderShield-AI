@@ -902,33 +902,51 @@ p {
   color: var(--color-primary);
 }
 
-.transcript-line-risk {
-  background: var(--color-risk-bg);
-  border-left-color: var(--color-risk-border);
+/* Five-level severity highlighting, best -> worst. Colours map 1:1 onto the
+   scoring rubric's bands (see grades.ts). The second level is light green, not
+   yellow: yellow first appears at the middle. The colour is never the only
+   signal — each line also carries a text label. `--fnd-fg` is picked up by the
+   note's currentColor border. */
+.finding-best {
+  --fnd-fg: var(--grade-a-fg);
+  background: var(--grade-a-bg);
+  border-left-color: var(--grade-a-fg);
 }
 
-.transcript-line-good {
-  background: var(--color-good-bg);
-  border-left-color: var(--color-good-border);
+.finding-good {
+  --fnd-fg: var(--grade-b-fg);
+  background: var(--grade-b-bg);
+  border-left-color: var(--grade-b-fg);
 }
 
-/* Inline note. The leading word ("Mistake" / "Good move") carries the
-   meaning without relying on the colour. */
+.finding-middling {
+  --fnd-fg: var(--grade-c-fg);
+  background: var(--grade-c-bg);
+  border-left-color: var(--grade-c-fg);
+}
+
+.finding-poor {
+  --fnd-fg: var(--grade-d-fg);
+  background: var(--grade-d-bg);
+  border-left-color: var(--grade-d-fg);
+}
+
+.finding-worst {
+  --fnd-fg: var(--grade-f-fg);
+  background: var(--grade-f-bg);
+  border-left-color: var(--grade-f-fg);
+}
+
+/* Inline note. The leading label word carries the meaning without relying on
+   colour; the note text colour follows the line's severity. */
 .transcript-note {
   display: block;
   font-size: var(--text-base);
   font-weight: var(--weight-medium);
+  color: var(--fnd-fg, var(--color-text));
   margin-top: var(--space-2);
   padding-left: var(--space-4);
   border-left: 2px solid currentColor;
-}
-
-.transcript-note-risk {
-  color: var(--color-risk-fg);
-}
-
-.transcript-note-good {
-  color: var(--color-good-fg);
 }
 
 .transcript-note-label {
@@ -936,6 +954,34 @@ p {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-right: var(--space-2);
+}
+
+/* Legend: the key to the severity colours, shown above the transcript. */
+.transcript-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-5);
+  list-style: none;
+  margin: 0 0 var(--space-4) 0;
+  padding: 0;
+}
+
+.transcript-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  color: var(--fnd-fg, var(--color-text));
+}
+
+.transcript-legend-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 2px solid var(--fnd-fg);
+  background: currentColor;
+  opacity: 0.35;
 }
 
 /* ---------- Live call status ---------- */
