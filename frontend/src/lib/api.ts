@@ -22,6 +22,8 @@ async function throwIfNotOk(res: Response) {
 export interface StartSessionInput {
   phoneNumber: string
   scenarioId: string
+  /** Anonymous study code, e.g. "P07". Required by the backend. */
+  participantCode: string
 }
 
 export interface StartSessionResponse {
@@ -65,6 +67,12 @@ export interface SessionData {
   scoringModel?: string | null
   /** Set when scoring failed. Present means there will never be a score. */
   scoringError?: string | null
+  participantCode?: string | null
+  runNumber?: number | null
+  startedAt?: string | null
+  endedAt?: string | null
+  /** Set when this call could not be written to the study data store. */
+  persistError?: string | null
 }
 
 export async function getSession(sessionId: string): Promise<SessionData> {

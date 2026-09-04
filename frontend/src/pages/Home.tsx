@@ -1,6 +1,13 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { startSession } from '../lib/api'
+import {
+  clearParticipantCode,
+  getStoredParticipantCode,
+  isValidParticipantCode,
+  normaliseParticipantCode,
+  storeParticipantCode,
+} from '../lib/participants'
 import Input from '../ui/Input'
 
 const SCENARIOS = [
@@ -37,8 +44,41 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Study participant code. Asked for before anything else on first visit;
+  // remembered in localStorage so both of a participant's calls link up.
+  const [participantCode, setParticipantCode] = useState<string | null>(() =>
+    getStoredParticipantCode()
+  )
+  const [codeInput, setCodeInput] = useState('')
+  const [codeError, setCodeError] = useState<string | null>(null)
+
+  function handleCodeSubmit() {
+    const code = normaliseParticipantCode(codeInput)
+    if (!isValidParticipantCode(code)) {
+      setCodeError(
+        'That code was not recognised. It should be the letter P followed by two digits, like P07, exactly as printed on your card.'
+      )
+      return
+    }
+    storeParticipantCode(code)
+    setParticipantCode(code)
+    setCodeError(null)
+    setCodeInput('')
+  }
+
+  function handleChangeCode() {
+    clearParticipantCode()
+    setParticipantCode(null)
+    setError(null)
+  }
+
   async function handleStart() {
     setError(null)
+
+    if (!participantCode) {
+      setError('Please enter your participant code first.')
+      return
+    }
 
     if (!isValidPhone(phoneNumber)) {
       setError('Please enter a valid phone number (at least 10 digits).')
@@ -47,7 +87,11 @@ export default function Home() {
 
     setLoading(true)
     try {
-      const { sessionId, callPlaced } = await startSession({ phoneNumber, scenarioId })
+      const { sessionId, callPlaced } = await startSession({
+        phoneNumber,
+        scenarioId,
+        participantCode,
+      })
       navigate(`/live/${sessionId}`, { state: { demoMode: !callPlaced } })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start session')
@@ -56,9 +100,67 @@ export default function Home() {
     }
   }
 
+  if (!participantCode) {
+    return (
+      <div className="home-page">
+        <div className="home-card">
+          <section className="code-gate" aria-labelledby="code-gate-title">
+            <p className="code-gate-eyebrow">Research study</p>
+            <h1 id="code-gate-title" className="code-gate-title">
+              First, enter your participant code
+            </h1>
+            <p className="code-gate-text">
+              It is printed on the card you were given — the letter P followed by two digits,
+              such as <strong>P07</strong>. This code is the only thing we record about you.
+              There are no names, emails or accounts anywhere in this system.
+            </p>
+            <div className="code-gate-form">
+              <Input
+                label="Participant code"
+                value={codeInput}
+                onChange={(v) => {
+                  setCodeInput(v)
+                  if (codeError) setCodeError(null)
+                }}
+                placeholder="P07"
+                describedBy="code-gate-help"
+              />
+              <p className="code-gate-help" id="code-gate-help">
+                Capital letters or small, with or without the leading zero — both are fine.
+              </p>
+              {codeError && (
+                <p className="home-error" role="alert">
+                  {codeError}
+                </p>
+              )}
+              <button
+                type="button"
+                className="home-cta"
+                onClick={handleCodeSubmit}
+                disabled={!codeInput.trim()}
+              >
+                Continue
+              </button>
+            </div>
+          </section>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="home-page">
       <div className="home-card">
+        {/* Active study code, with a way to correct it. */}
+        <div className="participant-bar" role="status">
+          <span className="participant-bar-text">
+            Participant code: <strong>{participantCode}</strong>
+          </span>
+          <button type="button" className="participant-bar-change" onClick={handleChangeCode}>
+            Not you? Change code
+          </button>
+        </div>
+
         {/* 1. What this is — the first and largest thing on the page. */}
         <section className="home-banner">
           <p className="home-banner-eyebrow">Practice, not a real scam</p>

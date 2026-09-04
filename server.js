@@ -20,6 +20,7 @@ const twilio = require('twilio');
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const axios = require('axios');
 const http = require("http");
 const WebSocket = require("ws");
@@ -96,7 +97,187 @@ const client = twilio(
 
 const sessions = {}; // sessionId -> { phoneNumber, stage, transcript }
 
-app.get('/health', (req, res) => res.json({ ok: true }));
+/* ─── Study instrumentation ──────────────────────────────────────────────────
+ *
+ * Sessions live in memory and are wiped on every restart, so each call is also
+ * appended to an append-only JSONL file on a persistent volume. A record is
+ * written when the call ends and again once scoring finishes; readers keep the
+ * last record per sessionId. Phone numbers are deliberately never persisted —
+ * the participant code is the only identifier in the study data.
+ */
+
+/** Anonymous codes handed out on cards. The only identifier in the system. */
+const PARTICIPANT_CODES = Array.from({ length: 20 }, (_, i) => `P${String(i + 1).padStart(2, '0')}`);
+
+/** Same rule as the frontend: trim, uppercase, and accept "P7" for "P07". */
+function normaliseParticipantCode(raw) {
+  const trimmed = String(raw || '').trim().toUpperCase();
+  const m = trimmed.match(/^P(\d{1,2})$/);
+  return m ? `P${m[1].padStart(2, '0')}` : trimmed;
+}
+
+const DATA_DIR = process.env.DATA_DIR || null;
+const SESSIONS_FILE = DATA_DIR ? path.join(DATA_DIR, 'sessions.jsonl') : null;
+
+/** Live status of the store — reported at boot, on /health and on every call. */
+const dataStore = { ok: false, file: SESSIONS_FILE, error: null };
+
+function checkDataStore() {
+  if (!DATA_DIR) {
+    dataStore.error = 'DATA_DIR is not set — study data will NOT survive a restart';
+    console.error('DATA STORE: FAILED —', dataStore.error);
+    return;
+  }
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const probe = path.join(DATA_DIR, '.write-probe');
+    fs.writeFileSync(probe, String(Date.now()));
+    fs.unlinkSync(probe);
+    dataStore.ok = true;
+    dataStore.error = null;
+    console.log(`DATA STORE: ok — ${SESSIONS_FILE} (${readStoredSessions().length} stored call(s))`);
+  } catch (err) {
+    dataStore.error = `${DATA_DIR} is not writable: ${err.message}`;
+    console.error('DATA STORE: FAILED —', dataStore.error);
+  }
+}
+
+/** Every persisted record, last write per sessionId wins. */
+function readStoredSessions() {
+  if (!SESSIONS_FILE || !fs.existsSync(SESSIONS_FILE)) return [];
+  const byId = new Map();
+  for (const raw of fs.readFileSync(SESSIONS_FILE, 'utf8').split('\n')) {
+    if (!raw.trim()) continue;
+    try {
+      const rec = JSON.parse(raw);
+      if (rec?.sessionId) byId.set(rec.sessionId, rec);
+    } catch {
+      console.error('DATA STORE: skipping a corrupt line in', SESSIONS_FILE);
+    }
+  }
+  return [...byId.values()];
+}
+
+/** Mirrors GRADE_SCALE in frontend/src/lib/grades.ts — keep the two in step. */
+function letterGrade(score) {
+  if (score == null) return null;
+  if (score >= 90) return 'A';
+  if (score >= 75) return 'B';
+  if (score >= 60) return 'C';
+  if (score >= 40) return 'D';
+  return 'F';
+}
+
+/**
+ * Run number for a participant: one more than the calls they have already
+ * completed, counted across the store and anything still in memory.
+ */
+function nextRunNumber(participantCode) {
+  const stored = readStoredSessions();
+  const storedIds = new Set(stored.map((r) => r.sessionId));
+  let completed = stored.filter(
+    (r) => r.participantCode === participantCode && r.status === 'ended'
+  ).length;
+  for (const [id, sess] of Object.entries(sessions)) {
+    if (!storedIds.has(id) && sess.participantCode === participantCode && sess.status === 'ended') {
+      completed++;
+    }
+  }
+  return completed + 1;
+}
+
+/** The analysis-ready snapshot of a session. One object per call. */
+function sessionRecord(sessionId, s) {
+  const sr = s.score || null;
+  const log = s.transcriptLog || [];
+  // Timing baseline is the moment the audio stream opened (the phone was
+  // answered); fall back to when the call was requested.
+  const baseIso = s.answeredAt || s.startedAt || null;
+  const baseMs = baseIso ? Date.parse(baseIso) : null;
+  const secondsAfterBase = (iso) =>
+    baseMs != null && iso ? Math.round((Date.parse(iso) - baseMs) / 1000) : null;
+  const findings = Array.isArray(sr?.lineFindings) ? sr.lineFindings : [];
+  const firstOf = (type) => {
+    const f = findings.filter((x) => x.type === type).sort((a, b) => a.index - b.index)[0];
+    return f ? secondsAfterBase(log[f.index]?.at) : null;
+  };
+  const started = s.startedAt ? Date.parse(s.startedAt) : null;
+  const answered = s.answeredAt ? Date.parse(s.answeredAt) : null;
+  const ended = s.endedAt ? Date.parse(s.endedAt) : null;
+
+  return {
+    sessionId,
+    participantCode: s.participantCode ?? null,
+    runNumber: s.runNumber ?? null,
+    scenarioId: s.scenarioId ?? null,
+    status: s.status ?? null,
+    startedAt: s.startedAt ?? null,
+    answeredAt: s.answeredAt ?? null,
+    endedAt: s.endedAt ?? null,
+    // Request-to-hangup, including ring time.
+    durationSeconds: started != null && ended != null ? Math.round((ended - started) / 1000) : null,
+    // Answer-to-hangup — the time the participant actually spent on the call.
+    talkSeconds: answered != null && ended != null ? Math.round((ended - answered) / 1000) : null,
+    score: sr?.score ?? null,
+    tier: sr?.tier ?? null,
+    letterGrade: letterGrade(sr?.score ?? null),
+    explanation: sr?.explanation ?? null,
+    scoringModel: sr?.scoringModel ?? null,
+    scoringError: s.scoreError ?? null,
+    lineFindings: sr?.lineFindings ?? null,
+    timeToFirstRiskSeconds: firstOf('risk'),
+    timeToFirstGoodSeconds: firstOf('good'),
+    transcript: log,
+    recordedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Append the current state of a session to the store. Called at call end and
+ * again after scoring. Failure is recorded on the session so the debrief can
+ * show it, and logged loudly — silently losing study data is the one outcome
+ * this whole layer exists to prevent.
+ */
+function persistSession(sessionId) {
+  const s = sessions[sessionId];
+  if (!s) return;
+  const rec = sessionRecord(sessionId, s);
+  const who = `${sessionId} participant=${rec.participantCode ?? 'none'} run=${rec.runNumber ?? '?'}`;
+
+  if (!dataStore.ok) {
+    s.persistError = dataStore.error || 'data store unavailable';
+    console.error(`DATA STORE: NOT SAVED ${who} —`, s.persistError);
+    return;
+  }
+  try {
+    fs.appendFileSync(SESSIONS_FILE, JSON.stringify(rec) + '\n');
+    s.persistError = null;
+    s.persistedAt = rec.recordedAt;
+    console.log(`DATA STORE: saved ${who} scored=${rec.score != null}`);
+  } catch (err) {
+    s.persistError = `append failed: ${err.message}`;
+    console.error(`DATA STORE: NOT SAVED ${who} —`, s.persistError);
+  }
+}
+
+/** Timed twin of a transcript line. Index matches its position in `transcript`. */
+function appendTranscriptLog(sessionId, line, speaker, text) {
+  const s = sessions[sessionId];
+  if (!s) return;
+  if (!s.transcriptLog) s.transcriptLog = [];
+  s.transcriptLog.push({
+    index: s.transcript.length - 1,
+    line,
+    speaker,
+    text,
+    at: new Date().toISOString(),
+  });
+}
+
+checkDataStore();
+
+
+app.get('/health', (req, res) => res.json({ ok: true, dataStore }));
 
 app.post("/twilio-stream-status", (req, res) => {
   console.log("📡 STREAM STATUS CALLBACK:", req.body);
@@ -443,9 +624,14 @@ app.post("/api/sessions/start", async (req, res) => {
   try {
     const phoneNumber = (req.body.phoneNumber || "").trim();
     const scenarioId = (req.body.scenarioId || "").trim();
+    const participantCode = normaliseParticipantCode(req.body.participantCode);
 
     if (!phoneNumber) return res.status(400).json({ error: "phoneNumber required" });
     if (!scenarioId) return res.status(400).json({ error: "scenarioId required" });
+    if (!participantCode) return res.status(400).json({ error: "participantCode required" });
+    if (!PARTICIPANT_CODES.includes(participantCode)) {
+      return res.status(400).json({ error: `Unknown participant code "${participantCode}"` });
+    }
 
     const sessionId = uuidv4();
 
@@ -462,9 +648,18 @@ app.post("/api/sessions/start", async (req, res) => {
       agentId,
       stage: "GREETING",
       transcript: [],
+      // Parallel to `transcript`, same indices, with timing. Never read by
+      // scoring or attribution, so those keep their exact input.
+      transcriptLog: [],
       status: "in_progress",
       score: null,
       scoreError: null,
+      participantCode,
+      runNumber: nextRunNumber(participantCode),
+      startedAt: new Date().toISOString(),
+      answeredAt: null,
+      endedAt: null,
+      persistError: null,
     };
 
     const call = await client.calls.create({
@@ -474,7 +669,8 @@ app.post("/api/sessions/start", async (req, res) => {
       method: "POST",
     });
 
-    console.log("✅ call created:", call.sid, "scenario:", scenarioId, "agent:", agentId);
+    console.log("✅ call created:", call.sid, "scenario:", scenarioId, "agent:", agentId,
+      "participant:", participantCode, "run:", sessions[sessionId].runNumber);
 
     res.json({ sessionId, callPlaced: true });
   } catch (err) {
@@ -501,7 +697,81 @@ app.get('/api/sessions/:sessionId', (req, res) => {
     scoringModel: sr?.scoringModel ?? null,
     scoringError: s.scoreError ?? null,
     status: s.status ?? 'in_progress',
+    participantCode: s.participantCode ?? null,
+    runNumber: s.runNumber ?? null,
+    startedAt: s.startedAt ?? null,
+    endedAt: s.endedAt ?? null,
+    // Set when this call could not be written to the study store.
+    persistError: s.persistError ?? null,
   })
+})
+
+/* ─── Study export ───────────────────────────────────────────────────────────
+ * GET /api/export?token=…&format=json|csv
+ * One record per call. The token lives only in the EXPORT_TOKEN env var.
+ */
+function exportTokenMatches(given) {
+  const expected = process.env.EXPORT_TOKEN || '';
+  if (!expected || !given) return false;
+  const a = Buffer.from(String(given));
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+const EXPORT_COLUMNS = [
+  'sessionId', 'participantCode', 'runNumber', 'scenarioId', 'status',
+  'startedAt', 'answeredAt', 'endedAt', 'durationSeconds', 'talkSeconds',
+  'score', 'tier', 'letterGrade', 'scoringModel', 'scoringError',
+  'timeToFirstRiskSeconds', 'timeToFirstGoodSeconds',
+  'explanation', 'lineFindings', 'transcript', 'recordedAt',
+];
+
+function csvCell(v) {
+  if (v == null) return '';
+  const str = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+}
+
+/** Stored records merged with anything still in memory (memory is fresher). */
+function allSessionRecords() {
+  const byId = new Map(readStoredSessions().map((r) => [r.sessionId, r]));
+  for (const [id, sess] of Object.entries(sessions)) {
+    if (sess.participantCode) byId.set(id, sessionRecord(id, sess));
+  }
+  return [...byId.values()].sort((a, b) =>
+    String(a.participantCode).localeCompare(String(b.participantCode)) ||
+    (a.runNumber ?? 0) - (b.runNumber ?? 0) ||
+    String(a.startedAt).localeCompare(String(b.startedAt))
+  );
+}
+
+app.get('/api/export', (req, res) => {
+  if (!process.env.EXPORT_TOKEN) {
+    return res.status(503).json({ error: 'EXPORT_TOKEN is not configured on the server' });
+  }
+  if (!exportTokenMatches(req.query.token)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const records = allSessionRecords();
+  const format = String(req.query.format || 'json').toLowerCase();
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+  if (format === 'csv') {
+    const lines = [EXPORT_COLUMNS.join(',')];
+    for (const r of records) lines.push(EXPORT_COLUMNS.map((c) => csvCell(r[c])).join(','));
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="eldershield-sessions-${stamp}.csv"`);
+    return res.send(lines.join('\n') + '\n');
+  }
+
+  res.setHeader('Content-Disposition', `attachment; filename="eldershield-sessions-${stamp}.json"`);
+  return res.json({
+    exportedAt: new Date().toISOString(),
+    dataStore: { ok: dataStore.ok, error: dataStore.error },
+    count: records.length,
+    sessions: records,
+  });
 })
 
 /**
@@ -737,6 +1007,7 @@ Return ONLY valid JSON with no markdown:
 
     session.score = result;
     session.scoreError = null;
+    persistSession(sessionId);
 
     broadcastToBrowsers(sessionId, { type: "score", score: result });
 
@@ -748,6 +1019,7 @@ Return ONLY valid JSON with no markdown:
     // Surfaced to the debrief so a dead scorer reads as an error, not a spinner.
     session.scoreError =
       typeof detail === 'string' ? detail : JSON.stringify(detail);
+    persistSession(sessionId);
     return res.status(500).json({ error: err.message });
   }
 });
@@ -951,6 +1223,9 @@ function processElevenAudio(pcmB64) {
   if (msg.event === "start") {
     streamSid = msg.start?.streamSid;
     const callSid = msg.start?.callSid; // ✅ use this as key
+    if (sessionId && sessions[sessionId] && !sessions[sessionId].answeredAt) {
+      sessions[sessionId].answeredAt = new Date().toISOString();
+    }
   }
 
   if (msg.event === "media") {
@@ -978,10 +1253,13 @@ function processElevenAudio(pcmB64) {
   // Mark session ended + tell browser UIs
   if (sessionId) {
     if (!sessions[sessionId]) {
-      sessions[sessionId] = { stage: "GREETING", transcript: [], status: "ended" };
+      sessions[sessionId] = { stage: "GREETING", transcript: [], transcriptLog: [], status: "ended" };
     } else {
       sessions[sessionId].status = "ended";
     }
+    sessions[sessionId].endedAt = new Date().toISOString();
+    // First write: the call as it ended. Scoring appends a second, fuller record.
+    persistSession(sessionId);
     broadcastToBrowsers(sessionId, { type: "ended" });
     // ✅ Auto-trigger scoring AFTER call ends (non-blocking)
 setTimeout(() => {
@@ -1079,6 +1357,7 @@ setTimeout(() => {
         if (text && sessionId) {
           const line = `You: ${text}`;
           sessions[sessionId].transcript.push(line);
+          appendTranscriptLog(sessionId, line, 'You', text);
           broadcastToBrowsers(sessionId, { type: "transcript", line });
         }
         return;
@@ -1089,6 +1368,7 @@ setTimeout(() => {
         if (text && sessionId) {
           const line = `Caller: ${text}`;
           sessions[sessionId].transcript.push(line);
+          appendTranscriptLog(sessionId, line, 'Caller', text);
           broadcastToBrowsers(sessionId, { type: "transcript", line });
         }
         return;

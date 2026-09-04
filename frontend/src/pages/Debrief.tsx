@@ -119,6 +119,17 @@ export default function Debrief() {
         Here is your grade, what you said, and what to do differently next time.
       </p>
 
+      {data.persistError && (
+        <div className="alert-warning" role="alert">
+          <p className="alert-warning-title">This call was not saved for the study</p>
+          <p className="alert-warning-body">
+            Your results below are correct, but they could not be written to the study
+            records. Please tell the person running the session before you leave.
+          </p>
+          <p className="alert-warning-detail">Technical details: {data.persistError}</p>
+        </div>
+      )}
+
       <section style={{ marginBottom: 'var(--space-8)' }}>
         <h2 className="section-title">Your grade</h2>
         {data.scoringError ? (
