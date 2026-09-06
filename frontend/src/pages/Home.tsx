@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { startSession } from '../lib/api'
+import { getAvailableScenarios, startSession } from '../lib/api'
 import {
   clearParticipantCode,
   getStoredParticipantCode,
@@ -62,6 +62,37 @@ export default function Home() {
   const [scenarioId, setScenarioId] = useState(SCENARIOS[0].id)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Which scenarios the server can actually dial. null = still loading. The
+  // list is filtered by this so a scenario whose agent is unset is never shown.
+  const [availableIds, setAvailableIds] = useState<string[] | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getAvailableScenarios()
+      .then((ids) => {
+        if (!cancelled) setAvailableIds(ids)
+      })
+      .catch(() => {
+        // If the list can't be fetched, show nothing dialable rather than risk
+        // offering a scenario that would refuse — the facilitator can refresh.
+        if (!cancelled) setAvailableIds([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const visibleScenarios =
+    availableIds === null ? [] : SCENARIOS.filter((s) => availableIds.includes(s.id))
+
+  // Keep the selection valid as the available list resolves.
+  useEffect(() => {
+    if (visibleScenarios.length === 0) return
+    if (!visibleScenarios.some((s) => s.id === scenarioId)) {
+      setScenarioId(visibleScenarios[0].id)
+    }
+  }, [availableIds]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Study participant code. Asked for before anything else on first visit;
   // remembered in localStorage so both of a participant's calls link up.
@@ -285,32 +316,41 @@ export default function Home() {
           <p className="home-section-intro">
             They all work the same way. Pick whichever one you would like to practise.
           </p>
-          <div className="home-scenario-grid" role="radiogroup" aria-label="Choose your practice call">
-            {SCENARIOS.map((s) => {
-              const selected = scenarioId === s.id
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => setScenarioId(s.id)}
-                  className={`home-scenario-card ${selected ? 'selected' : ''}`}
-                >
-                  <span className="home-scenario-marker" aria-hidden="true">
-                    {selected ? '✓' : ''}
-                  </span>
-                  <span className="home-scenario-icon" aria-hidden="true">
-                    <ScenarioIcon scenario={s.id} size={36} />
-                  </span>
-                  <span className="home-scenario-body">
-                    <span className="home-scenario-title">{s.label}</span>
-                    <span className="home-scenario-desc">{s.description}</span>
-                  </span>
-                </button>
-              )
-            })}
-          </div>
+          {availableIds === null ? (
+            <p className="muted">Loading the practice calls...</p>
+          ) : visibleScenarios.length === 0 ? (
+            <p className="home-error" role="alert">
+              The practice calls could not be loaded. Please refresh the page, or tell the
+              person running the session.
+            </p>
+          ) : (
+            <div className="home-scenario-grid" role="radiogroup" aria-label="Choose your practice call">
+              {visibleScenarios.map((s) => {
+                const selected = scenarioId === s.id
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setScenarioId(s.id)}
+                    className={`home-scenario-card ${selected ? 'selected' : ''}`}
+                  >
+                    <span className="home-scenario-marker" aria-hidden="true">
+                      {selected ? '✓' : ''}
+                    </span>
+                    <span className="home-scenario-icon" aria-hidden="true">
+                      <ScenarioIcon scenario={s.id} size={36} />
+                    </span>
+                    <span className="home-scenario-body">
+                      <span className="home-scenario-title">{s.label}</span>
+                      <span className="home-scenario-desc">{s.description}</span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </section>
 
         {/* 6. Phone number — deliberately last */}
@@ -344,7 +384,7 @@ export default function Home() {
                 type="button"
                 className="home-cta"
                 onClick={handleStart}
-                disabled={loading || !phoneNumber.trim()}
+                disabled={loading || !phoneNumber.trim() || visibleScenarios.length === 0}
               >
                 {loading ? 'Starting your call...' : 'Call me for practice'}
               </button>

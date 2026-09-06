@@ -19,6 +19,18 @@ async function throwIfNotOk(res: Response) {
   throw new Error(msg || `Request failed (${res.status})`)
 }
 
+/**
+ * Scenario ids that are actually dialable (their agent is configured on the
+ * server). The landing page shows only these, so a caller never picks a
+ * scenario that would refuse to dial.
+ */
+export async function getAvailableScenarios(): Promise<string[]> {
+  const res = await fetch(`${BASE}/scenarios`)
+  await throwIfNotOk(res)
+  const data = await res.json()
+  return Array.isArray(data?.scenarios) ? data.scenarios : []
+}
+
 export interface StartSessionInput {
   phoneNumber: string
   scenarioId: string

@@ -636,6 +636,20 @@ for (const [id, agent] of Object.entries(SCENARIO_TO_AGENT)) {
   else console.error(`SCENARIO AGENT: MISSING — ${id} has no agent id set; calls for it will be refused`);
 }
 
+/** Scenario ids that are actually dialable (their agent is configured). */
+function availableScenarioIds() {
+  return Object.entries(SCENARIO_TO_AGENT)
+    .filter(([, agent]) => Boolean(agent))
+    .map(([id]) => id);
+}
+
+// The landing page filters its scenario list by this, so a student never sees
+// a practice call that would refuse to dial. The UI tracks which agents are
+// configured automatically — set an AGENT_* env var and that scenario appears.
+app.get('/api/scenarios', (req, res) => {
+  res.json({ scenarios: availableScenarioIds() });
+});
+
 app.post("/api/sessions/start", async (req, res) => {
   try {
     const phoneNumber = (req.body.phoneNumber || "").trim();
