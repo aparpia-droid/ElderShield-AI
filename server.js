@@ -811,6 +811,60 @@ app.get('/api/export', (req, res) => {
   });
 })
 
+/* ─── Study reset ─────────────────────────────────────────────────────────────
+ * POST /api/reset?token=…
+ * Clears the study data for a clean slate before the real study. It does NOT
+ * hard-delete: the current sessions.jsonl is renamed to a timestamped backup on
+ * the same volume, so it can be recovered. In-memory completed sessions are
+ * dropped too, so run-numbering restarts at 1; any call still in progress is
+ * left untouched. Token-gated with the same EXPORT_TOKEN.
+ */
+app.post('/api/reset', (req, res) => {
+  if (!process.env.EXPORT_TOKEN) {
+    return res.status(503).json({ error: 'EXPORT_TOKEN is not configured on the server' });
+  }
+  if (!exportTokenMatches(req.query.token)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  if (!dataStore.ok) {
+    return res.status(503).json({ error: dataStore.error || 'data store unavailable' });
+  }
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  let archived = 0;
+  let backup = null;
+
+  try {
+    if (fs.existsSync(SESSIONS_FILE)) {
+      archived = readStoredSessions().length;
+      backup = path.join(DATA_DIR, `sessions.archived-${stamp}.jsonl`);
+      fs.renameSync(SESSIONS_FILE, backup);
+    }
+  } catch (err) {
+    console.error('RESET: could not archive store —', err.message);
+    return res.status(500).json({ error: `Could not archive store: ${err.message}` });
+  }
+
+  // Drop completed sessions from memory so they are not re-counted or re-exported;
+  // keep any in-progress call so a live session is never disrupted.
+  let clearedFromMemory = 0;
+  for (const [id, sess] of Object.entries(sessions)) {
+    if (sess.status !== 'in_progress') {
+      delete sessions[id];
+      clearedFromMemory++;
+    }
+  }
+
+  console.log(`RESET: archived ${archived} record(s) to ${backup || '(none)'}, cleared ${clearedFromMemory} from memory`);
+  return res.json({
+    ok: true,
+    archivedRecords: archived,
+    backupFile: backup ? path.basename(backup) : null,
+    clearedFromMemory,
+    message: 'Study data cleared. The previous records were archived on the volume, not deleted.',
+  });
+})
+
 /**
  * Line-level attribution for the debrief transcript.
  *
@@ -1196,7 +1250,19 @@ let transcoderReady = false;
 let elevenInRate_g = 16000;
 let elevenOutRate_g = 16000;
 
-let pcmChunkBytes = 3200; // will update from metadata (100ms)
+/**
+ * How much caller audio to buffer before forwarding a chunk to ElevenLabs.
+ * Lower = less latency and finer-grained turn/interruption detection; higher =
+ * fewer, larger messages. Was a fixed 100ms; now 20ms (matching Twilio's own
+ * frame size, i.e. near pass-through) for a snappier feel.
+ *
+ * FALLBACK: to restore the previous behaviour exactly, set AUDIO_CHUNK_MS=100
+ * in the Railway variables — no code change or redeploy from us needed.
+ */
+const AUDIO_CHUNK_MS = Math.min(200, Math.max(10, parseInt(process.env.AUDIO_CHUNK_MS || '20', 10) || 20));
+console.log('AUDIO CHUNK MS:', AUDIO_CHUNK_MS);
+
+let pcmChunkBytes = 3200; // recomputed from stream metadata below
 
 // Buffer Twilio audio until transcoders are ready
 let twilioMulawQueue = Buffer.alloc(0);
@@ -1208,8 +1274,8 @@ function startTranscoders({ elevenInRate, elevenOutRate }) {
   elevenInRate_g = elevenInRate;
   elevenOutRate_g = elevenOutRate;
 
-  // 100ms chunks -> bytes = rate * 0.1s * 2 bytes/sample
-  pcmChunkBytes = Math.round(elevenInRate * 0.1 * 2);
+  // chunk bytes = rate * (AUDIO_CHUNK_MS/1000)s * 2 bytes/sample
+  pcmChunkBytes = Math.round(elevenInRate * (AUDIO_CHUNK_MS / 1000) * 2);
 
   transcoderReady = true;
   console.log("✅ Pure JS transcoders ready:", { elevenInRate, elevenOutRate, pcmChunkBytes });
